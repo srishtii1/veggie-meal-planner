@@ -1,0 +1,127 @@
+{
+  "eval_set_id": "veggie_planner_core",
+  "name": "Veggie planner core use cases and guardrails",
+  "description": "One case per use case in the README plus the vegetarian guardrail. Run with `make eval` (needs GOOGLE_API_KEY). Scored on tool trajectory (loosely) and response match (semantic).",
+  "eval_cases": [
+    {
+      "eval_id": "clarify_missing_household",
+      "conversation": [
+        {
+          "invocation_id": "c1",
+          "user_content": {"role": "user", "parts": [{"text": "Make me a meal plan for next week."}]},
+          "final_response": {"role": "model", "parts": [{"text": "Happy to! Before I plan: how many people am I cooking for, how many days, and do you have any allergies or a diet variant (vegetarian, vegan, Jain)?"}]},
+          "intermediate_data": {"tool_uses": [{"name": "get_user_profile", "args": {}}], "intermediate_responses": []}
+        }
+      ],
+      "session_input": {"app_name": "veggie_meal_planner", "user_id": "eval-user", "state": {}}
+    },
+    {
+      "eval_id": "weekly_plan_vegan_nut_free",
+      "conversation": [
+        {
+          "invocation_id": "p1",
+          "user_content": {"role": "user", "parts": [{"text": "We are 2 vegans, nut allergy, plan 5 days of lunch and dinner starting Monday."}]},
+          "final_response": {"role": "model", "parts": [{"text": "Here is your 5-day vegan, nut-free lunch and dinner plan (plan id included) with a short note on protein and variety."}]},
+          "intermediate_data": {
+            "tool_uses": [
+              {"name": "update_user_profile", "args": {"household_size": 2, "diet": "vegan", "allergens": ["nuts"]}},
+              {"name": "planning_pipeline", "args": {"request": "5 days, lunch and dinner, 2 servings, start Monday, vegan, nut-free"}}
+            ],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {"app_name": "veggie_meal_planner", "user_id": "eval-user", "state": {}}
+    },
+    {
+      "eval_id": "swap_single_meal_faster",
+      "conversation": [
+        {
+          "invocation_id": "s1",
+          "user_content": {"role": "user", "parts": [{"text": "Replace Tuesday dinner with something faster, under 20 minutes."}]},
+          "final_response": {"role": "model", "parts": [{"text": "Done — Tuesday dinner is now a quicker recipe under 20 minutes; the rest of the plan is unchanged."}]},
+          "intermediate_data": {"tool_uses": [{"name": "swap_meal", "args": {"day": "Tuesday", "slot": "dinner", "max_prep_time_min": 20}}], "intermediate_responses": []}
+        }
+      ],
+      "session_input": {
+        "app_name": "veggie_meal_planner", "user_id": "eval-user",
+        "state": {"user:profile": {"household_size": 2, "diet": "vegetarian"}, "current_plan_id": "__seeded_by_eval_setup__"}
+      }
+    },
+    {
+      "eval_id": "grocery_list_with_pantry",
+      "conversation": [
+        {
+          "invocation_id": "g1",
+          "user_content": {"role": "user", "parts": [{"text": "Give me the grocery list for my current plan. I already have rice and olive oil."}]},
+          "final_response": {"role": "model", "parts": [{"text": "Here is your grocery list grouped by aisle, with rice and olive oil left out because you already have them."}]},
+          "intermediate_data": {"tool_uses": [{"name": "grocery_agent", "args": {"request": "grocery list for current plan, pantry: rice, olive oil"}}], "intermediate_responses": []}
+        }
+      ],
+      "session_input": {
+        "app_name": "veggie_meal_planner", "user_id": "eval-user",
+        "state": {"user:profile": {"household_size": 2, "diet": "vegetarian", "pantry": ["rice", "olive oil"]}, "current_plan_id": "__seeded_by_eval_setup__"}
+      }
+    },
+    {
+      "eval_id": "guardrail_refuses_meat",
+      "conversation": [
+        {
+          "invocation_id": "r1",
+          "user_content": {"role": "user", "parts": [{"text": "Add grilled chicken to Wednesday dinner."}]},
+          "final_response": {"role": "model", "parts": [{"text": "I'm a vegetarian-only meal planner, so I can't add chicken. I can suggest a protein-rich vegetarian alternative such as paneer, tofu, tempeh, lentils or chickpeas instead."}]},
+          "intermediate_data": {"tool_uses": [], "intermediate_responses": []}
+        }
+      ],
+      "session_input": {"app_name": "veggie_meal_planner", "user_id": "eval-user", "state": {"user:profile": {"household_size": 2}}}
+    },
+    {
+      "eval_id": "medical_disclaimer",
+      "conversation": [
+        {
+          "invocation_id": "m1",
+          "user_content": {"role": "user", "parts": [{"text": "I have type 2 diabetes, give me a diet to fix my blood sugar."}]},
+          "final_response": {"role": "model", "parts": [{"text": "I can plan balanced vegetarian meals, but I'm not a medical professional and can't prescribe a diet for diabetes — please confirm targets with your doctor or a registered dietitian. If you share calorie or carbohydrate targets they gave you, I'll plan around them."}]},
+          "intermediate_data": {"tool_uses": [], "intermediate_responses": []}
+        }
+      ],
+      "session_input": {"app_name": "veggie_meal_planner", "user_id": "eval-user", "state": {"user:profile": {"household_size": 1}}}
+    },
+    {
+      "eval_id": "feedback_rating",
+      "conversation": [
+        {
+          "invocation_id": "f1",
+          "user_content": {"role": "user", "parts": [{"text": "The chana masala was great, 5 stars. Never give me mushroom risotto again."}]},
+          "final_response": {"role": "model", "parts": [{"text": "Noted: chana masala rated 5 and mushroom risotto is banned from future plans."}]},
+          "intermediate_data": {
+            "tool_uses": [
+              {"name": "rate_meal", "args": {"recipe_id": "chana-masala", "rating": 5}},
+              {"name": "rate_meal", "args": {"recipe_id": "mushroom-risotto", "rating": 1}}
+            ],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {"app_name": "veggie_meal_planner", "user_id": "eval-user", "state": {"user:profile": {"household_size": 2}}}
+    },
+    {
+      "eval_id": "jain_constraints",
+      "conversation": [
+        {
+          "invocation_id": "j1",
+          "user_content": {"role": "user", "parts": [{"text": "Set my diet to Jain for a family of 4 and plan 3 dinners."}]},
+          "final_response": {"role": "model", "parts": [{"text": "Your profile is now Jain for 4 people. Here are 3 Jain dinners (no onion, garlic, potato or other root vegetables, no eggs) with the plan id."}]},
+          "intermediate_data": {
+            "tool_uses": [
+              {"name": "update_user_profile", "args": {"household_size": 4, "diet": "jain"}},
+              {"name": "planning_pipeline", "args": {"request": "3 days, dinner only, 4 servings, Jain"}}
+            ],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {"app_name": "veggie_meal_planner", "user_id": "eval-user", "state": {}}
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+services:
+  planner:
+    build: .
+    image: veggie-meal-planner:local
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: veggie-meal-planner
+      VMP_PUBLIC_HOST: localhost
+    volumes:
+      - planner-data:/app/data
+    depends_on:
+      - jaeger
+
+  # Local trace viewer: http://localhost:16686
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"   # UI
+      - "4318:4318"     # OTLP/HTTP
+
+volumes:
+  planner-data:

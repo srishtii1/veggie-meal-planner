@@ -1,0 +1,36 @@
+name: Deploy to Vertex AI Agent Engine
+
+# Manual trigger only. Requires repository secrets/variables:
+#   GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_SERVICE_ACCOUNT (vars/secrets for OIDC auth)
+#   GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION, AGENT_ENGINE_STAGING_BUCKET (vars)
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        default: staging
+        type: choice
+        options: [staging, production]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen --group deploy
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - run: uv run python deployment/deploy_agent_engine.py
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION }}
+          AGENT_ENGINE_STAGING_BUCKET: ${{ vars.AGENT_ENGINE_STAGING_BUCKET }}
+          GOOGLE_GENAI_USE_VERTEXAI: "TRUE"

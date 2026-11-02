@@ -1,0 +1,95 @@
+[project]
+name = "veggie-meal-planner"
+version = "0.1.0"
+description = "A vegetarian meal-planning agent built with Google ADK: weekly plans, grocery lists, nutrition targets and hard vegetarian guardrails."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.162.0",
+    "google-adk[a2a,db]>=2.13.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    "pydantic>=2.14.1",
+    "pydantic-settings>=2.16.1",
+    "python-dotenv>=1.2.4",
+    "sqlalchemy[asyncio]>=2.1.6",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.54.0",
+]
+keywords = ["adk", "agent", "gemini", "meal-planning", "vegetarian", "a2a"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Framework :: FastAPI",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/srishtiarora/veggie-meal-planner"
+
+[project.scripts]
+veggie-planner = "veggie_planner.api.app:main"
+
+[tool.uv]
+default-groups = ["dev"]
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "veggie_planner"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: tests that call a real Gemini model (need GOOGLE_API_KEY)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore:.*EXPERIMENTAL.*:UserWarning",
+]
+
+[tool.coverage.run]
+source = ["veggie_planner"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM", "RUF", "ANN"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+packages = ["veggie_planner"]
+mypy_path = "src"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.4.0",
+    "pre-commit>=4.7.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.2",
+]
+deploy = [
+    "google-cloud-aiplatform[adk,agent-engines]>=1.100",
+]
