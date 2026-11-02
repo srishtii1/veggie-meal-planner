@@ -40,7 +40,7 @@ def main() -> int:
         extra_packages=["src/veggie_planner"],
         env_vars={
             "VMP_SESSION_BACKEND": "vertex",
-            "VMP_MODEL": os.environ.get("VMP_MODEL", "gemini-2.5-flash"),
+            "VMP_MODEL": os.environ.get("VMP_MODEL", "gemini-3.5-flash"),
         },
     )
     print(f"Deployed: {remote.resource_name}")

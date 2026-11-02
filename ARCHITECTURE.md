@@ -6,7 +6,7 @@ production concerns around them.
 
 ## 1. Model layer
 
-- Default `gemini-2.5-flash` for every agent (`VMP_MODEL`); the planner can be pointed at
+- Default `gemini-3.5-flash` for every agent (`VMP_MODEL`); the planner can be pointed at
   a stronger model independently (`VMP_PLANNER_MODEL`) because it does the most reasoning.
 - The model never does arithmetic or compliance checks. Every number the user sees
   (calories, protein, cost, quantities) comes from `planning_engine.py`.

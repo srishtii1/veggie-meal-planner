@@ -115,12 +115,12 @@ deployment/             # Agent Engine deploy script
 | Variable | Default | Purpose |
 |---|---|---|
 | `GOOGLE_API_KEY` / `GOOGLE_GENAI_USE_VERTEXAI` | — | Gemini via AI Studio (`FALSE`) or Vertex (`TRUE`) |
-| `VMP_MODEL` | `gemini-2.5-flash` | Model for all agents (`VMP_PLANNER_MODEL` overrides the planner) |
+| `VMP_MODEL` | `gemini-3.5-flash` | Model for all agents (`VMP_PLANNER_MODEL` overrides the planner) |
 | `VMP_SESSION_BACKEND` | `sqlite` | `memory` · `sqlite` · `vertex` |
 | `VMP_DB_URL` | `sqlite+aiosqlite:///./data/veggie_planner.db` | ADK session DB |
 | `VMP_MAX_LOOP_ITERATIONS` | `3` | Draft → critique → fix rounds |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Send traces/metrics to an OTLP collector (Jaeger) |
-| `VMP_TRACE_CONSOLE` | `false` | Also print spans to stderr |
+| `VMP_TRACE_CONSOLE` | `false` | Print spans/metrics to stderr (handy without Jaeger) |
 
 ## Testing & evals
 

@@ -5,14 +5,19 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Export GOOGLE_API_KEY / GOOGLE_GENAI_* etc. from .env so the google-genai client sees them.
+# Real environment variables always win (override=False).
+load_dotenv(override=False)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VMP_", env_file=".env", extra="ignore")
 
     app_name: str = "veggie_meal_planner"
-    model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.5-flash"
     planner_model: str | None = None  # defaults to ``model``
     session_backend: Literal["memory", "sqlite", "vertex"] = "sqlite"
     db_url: str = "sqlite+aiosqlite:///./data/veggie_planner.db"

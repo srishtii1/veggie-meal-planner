@@ -1,8 +1,9 @@
 """OpenTelemetry + structlog setup.
 
 ADK emits spans for every agent invocation, model call and tool call through the global
-tracer provider. We install that provider here (console exporter for dev, OTLP/HTTP when
-``OTEL_EXPORTER_OTLP_ENDPOINT`` is set, e.g. to Jaeger) and add a custom span per REST
+tracer provider. We install that provider here (OTLP/HTTP when
+``OTEL_EXPORTER_OTLP_ENDPOINT`` is set, e.g. to Jaeger; console exporter with
+``VMP_TRACE_CONSOLE=true``) and add a custom span per REST
 request so a trace looks like: ``POST /chat -> invoke_agent -> call_llm -> execute_tool``.
 """
 
@@ -97,7 +98,7 @@ def configure_telemetry(settings: Settings | None = None, *, in_memory: bool = F
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
             tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-        if settings.trace_console or not endpoint:
+        if settings.trace_console:
             tracer_provider.add_span_processor(
                 BatchSpanProcessor(ConsoleSpanExporter(out=sys.stderr))
             )

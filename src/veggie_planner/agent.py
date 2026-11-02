@@ -1,4 +1,4 @@
-"""ADK CLI entrypoint: ``adk web src`` / ``adk run src/veggie_planner`` discover ``root_agent`` here."""
+"""ADK CLI entrypoint: ``adk web src`` discovers ``root_agent`` here."""
 
 from veggie_planner.agents.agent import root_agent
 
