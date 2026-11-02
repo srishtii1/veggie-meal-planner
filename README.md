@@ -1,6 +1,6 @@
 # 🥦 Veggie Meal Planner — a vegetarian meal-planning agent on Google ADK
 
-[![CI](https://github.com/srishtiarora/veggie-meal-planner/actions/workflows/ci.yml/badge.svg)](https://github.com/srishtiarora/veggie-meal-planner/actions/workflows/ci.yml)
+[![CI](https://github.com/srishtii1/veggie-meal-planner/actions/workflows/ci.yml/badge.svg)](https://github.com/srishtii1/veggie-meal-planner/actions/workflows/ci.yml)
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
 ![google-adk](https://img.shields.io/badge/google--adk-2.13-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -17,7 +17,7 @@ Interfaces: **REST** (`POST /chat`), **A2A** (`/a2a`), and the **ADK dev UI** (`
 ## Quick start
 
 ```bash
-git clone https://github.com/srishtiarora/veggie-meal-planner && cd veggie-meal-planner
+git clone https://github.com/srishtii1/veggie-meal-planner && cd veggie-meal-planner
 uv sync --all-groups                      # Python 3.12, pinned lockfile
 cp .env.example .env                      # add GOOGLE_API_KEY from https://aistudio.google.com/apikey
 

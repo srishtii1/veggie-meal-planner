@@ -27,7 +27,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/srishtiarora/veggie-meal-planner"
+Homepage = "https://github.com/srishtii1/veggie-meal-planner"
 
 [project.scripts]
 veggie-planner = "veggie_planner.api.app:main"
