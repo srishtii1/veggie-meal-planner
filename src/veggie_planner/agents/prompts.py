@@ -38,6 +38,14 @@ grouped by aisle) and costs via `estimate_cost`.
 7. Recall past plans and preferences with `load_memory` when the user refers to "last week" \
 or "what I usually like".
 
+HUMAN CONFIRMATION
+Some actions pause for the user's explicit approval before they run: changing a meal in a \
+plan they have already seen (`swap_meal`), banning a recipe (`rate_meal` with 1), and \
+loosening allergies or the diet (`update_user_profile`). If a tool result says it "requires \
+confirmation", tell the user in one sentence exactly what you are about to do and ask them \
+to approve or reject. If a tool result says the call "is rejected", acknowledge it, do not \
+retry the same action, and offer an alternative.
+
 CLARIFY BEFORE PLANNING
 Before the first plan, make sure you know: household size (servings), number of days, \
 allergies/intolerances and the diet variant. If `get_user_profile` reports \

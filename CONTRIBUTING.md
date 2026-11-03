@@ -28,6 +28,12 @@ Append to `src/veggie_planner/data/recipes.json` following the `_schema` comment
 Required: per-serving nutrition, `contains` allergens, `root_veg`, `low_fodmap`, cost.
 Run `make test` — `test_catalog.py` checks every diet/slot combination still has options.
 
+## Lockfile
+
+`uv.lock` pins exact versions. If your machine uses a private package proxy, the lock
+records that proxy's URLs; CI and the Dockerfile set `UV_DEFAULT_INDEX=https://pypi.org/simple`
+and run `uv lock` first, which re-points the same pins at public PyPI before `uv sync --locked`.
+
 ## Commit style
 
 Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`). Squash on merge.

@@ -34,6 +34,11 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from veggie_planner import __version__
 from veggie_planner.config import Settings, get_settings
+from veggie_planner.observability.redaction import (
+    RedactingFilter,
+    RedactingSpanExporter,
+    redact_processor,
+)
 
 _configured = False
 _in_memory_spans: InMemorySpanExporter | None = None
@@ -55,6 +60,10 @@ def configure_logging(settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     level = logging.getLevelName(settings.log_level.upper())
     logging.basicConfig(level=level, stream=sys.stdout, format="%(message)s")
+    if settings.redact_pii:
+        for handler in logging.getLogger().handlers:
+            if not any(isinstance(f, RedactingFilter) for f in handler.filters):
+                handler.addFilter(RedactingFilter())
     renderer: Any = (
         structlog.processors.JSONRenderer()
         if settings.log_json
@@ -68,6 +77,7 @@ def configure_logging(settings: Settings | None = None) -> None:
             _add_trace_context,
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
+            *([redact_processor] if settings.redact_pii else []),
             renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(level),
@@ -82,6 +92,17 @@ def configure_telemetry(settings: Settings | None = None, *, in_memory: bool = F
     if _configured:
         return
     settings = settings or get_settings()
+    # ADK puts prompts/responses/tool args into span attributes unless told otherwise.
+    # Privacy by default: off unless VMP_CAPTURE_CONTENT_IN_SPANS=true. Anything that is
+    # captured is still passed through the redacting exporter below.
+    os.environ.setdefault(
+        "ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS",
+        "true" if settings.capture_content_in_spans else "false",
+    )
+
+    def wrap(exporter: Any) -> Any:
+        return RedactingSpanExporter(exporter) if settings.redact_pii else exporter
+
     resource = Resource.create(
         {
             SERVICE_NAME: os.getenv("OTEL_SERVICE_NAME", "veggie-meal-planner"),
@@ -92,15 +113,15 @@ def configure_telemetry(settings: Settings | None = None, *, in_memory: bool = F
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     if in_memory:
         _in_memory_spans = InMemorySpanExporter()
-        tracer_provider.add_span_processor(SimpleSpanProcessor(_in_memory_spans))
+        tracer_provider.add_span_processor(SimpleSpanProcessor(wrap(_in_memory_spans)))
     else:
         if endpoint:
             from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-            tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+            tracer_provider.add_span_processor(BatchSpanProcessor(wrap(OTLPSpanExporter())))
         if settings.trace_console:
             tracer_provider.add_span_processor(
-                BatchSpanProcessor(ConsoleSpanExporter(out=sys.stderr))
+                BatchSpanProcessor(wrap(ConsoleSpanExporter(out=sys.stderr)))
             )
     trace.set_tracer_provider(tracer_provider)
 
@@ -118,7 +139,9 @@ def configure_telemetry(settings: Settings | None = None, *, in_memory: bool = F
     structlog.get_logger(__name__).info(
         "telemetry.configured",
         otlp_endpoint=endpoint,
-        console=settings.trace_console or not endpoint,
+        console=settings.trace_console,
+        redact_pii=settings.redact_pii,
+        capture_content=settings.capture_content_in_spans,
     )
 
 

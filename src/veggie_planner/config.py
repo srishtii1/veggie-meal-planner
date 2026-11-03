@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     log_json: bool = True
     trace_console: bool = False
     max_loop_iterations: int = 3
+    # Human-in-the-loop: pause and ask before plan edits, permanent bans, or loosening
+    # allergen/diet constraints. Disable only for batch/eval runs.
+    require_confirmation: bool = True
+    # Privacy
+    redact_pii: bool = True
+    capture_content_in_spans: bool = False
     host: str = "0.0.0.0"
     port: int = 8080
     public_host: str = "localhost"  # advertised in the A2A agent card

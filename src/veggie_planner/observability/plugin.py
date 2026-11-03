@@ -1,4 +1,8 @@
-"""ADK plugin recording tokens, latency and tool-call counts as OTel metrics + structlog."""
+"""ADK plugin: token / latency / tool-outcome metrics and ``tool.call`` outcome logs.
+
+Pre-execution intent logging lives in ``observability/audit.py`` (an agent-level
+``before_tool_callback``) so it also runs under ``adk web`` and A2A without this plugin.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +20,9 @@ from google.adk.tools.tool_context import ToolContext
 from opentelemetry import metrics
 
 log = structlog.get_logger("veggie_planner.metrics")
+
+# Tools that change persisted state (plans, profile, ratings). Everything else is read-only.
+SIDE_EFFECT_TOOLS = frozenset({"draft_meal_plan", "swap_meal", "update_user_profile", "rate_meal"})
 
 
 class MetricsPlugin(BasePlugin):

@@ -23,7 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --frozen --group deploy
+      - run: uv lock && uv sync --locked --group deploy
+        env:
+          UV_DEFAULT_INDEX: https://pypi.org/simple
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}

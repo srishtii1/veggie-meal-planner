@@ -1,7 +1,8 @@
 """Agent tree.
 
 coordinator (LlmAgent, chat)
-├── tools: profile / recipe / swap / rating / memory tools
+├── tools: profile / recipe / memory tools; swap / rating / profile writes are
+│          human-confirmed (agents/confirmation.py)
 ├── AgentTool(planning_pipeline)      SequentialAgent
 │     ├── planning_loop               LoopAgent(max_iterations=N)
 │     │     ├── planner               LlmAgent  draft / fix
@@ -16,6 +17,7 @@ coordinator (LlmAgent, chat)
 from __future__ import annotations
 
 import warnings
+from typing import Any
 
 from google.adk.agents import LlmAgent, LoopAgent, SequentialAgent
 from google.adk.tools.agent_tool import AgentTool
@@ -24,8 +26,10 @@ from google.adk.tools.load_memory_tool import load_memory
 
 from veggie_planner.agents import prompts
 from veggie_planner.agents.callbacks import block_non_vegetarian_tool_args, scrub_prompt_injection
+from veggie_planner.agents.confirmation import coordinator_write_tools
 from veggie_planner.agents.presenter import PlanPresenterAgent
 from veggie_planner.config import get_settings
+from veggie_planner.observability.audit import log_tool_intent
 from veggie_planner.tools import (
     build_grocery_list,
     draft_meal_plan,
@@ -35,21 +39,36 @@ from veggie_planner.tools import (
     get_recipe,
     get_user_profile,
     list_diet_options,
-    rate_meal,
     search_recipes,
     swap_meal,
-    update_user_profile,
     validate_vegetarian,
 )
 
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="google.adk")
 
 
-def build_root_agent(model: str | None = None, planner_model: str | None = None) -> LlmAgent:
-    """Construct the agent tree. ``model`` may be a model id or a ``BaseLlm`` (tests)."""
+def build_root_agent(
+    model: Any = None,
+    planner_model: Any = None,
+    *,
+    require_confirmation: bool | None = None,
+) -> LlmAgent:
+    """Construct the agent tree.
+
+    Args:
+        model: Model id or ``BaseLlm`` (tests) for every agent. Defaults to ``VMP_MODEL``.
+        planner_model: Model for the planner only (strategic routing: the planner does the
+            heaviest reasoning). Defaults to ``VMP_PLANNER_MODEL``, else ``model``.
+        require_confirmation: Human-in-the-loop gating for the coordinator's side-effecting
+            tools. Defaults to ``VMP_REQUIRE_CONFIRMATION`` (on).
+    """
     settings = get_settings()
     model = model or settings.model
-    planner_model = planner_model or model or settings.effective_planner_model
+    if planner_model is None:
+        # A fake/injected BaseLlm applies to the whole tree; a model id may be overridden.
+        planner_model = (settings.planner_model or model) if isinstance(model, str) else model
+    if require_confirmation is None:
+        require_confirmation = settings.require_confirmation
 
     planner = LlmAgent(
         name="planner",
@@ -58,7 +77,7 @@ def build_root_agent(model: str | None = None, planner_model: str | None = None)
         instruction=prompts.PLANNER_INSTRUCTION,
         tools=[draft_meal_plan, swap_meal, search_recipes, get_meal_plan, evaluate_meal_plan],
         output_key="planner_summary",
-        before_tool_callback=block_non_vegetarian_tool_args,
+        before_tool_callback=[log_tool_intent, block_non_vegetarian_tool_args],
         before_model_callback=scrub_prompt_injection,
     )
     critic = LlmAgent(
@@ -68,6 +87,7 @@ def build_root_agent(model: str | None = None, planner_model: str | None = None)
         instruction=prompts.CRITIC_INSTRUCTION,
         tools=[evaluate_meal_plan, exit_loop],
         output_key="critic_feedback",
+        before_tool_callback=log_tool_intent,
         before_model_callback=scrub_prompt_injection,
     )
     planning_loop = LoopAgent(
@@ -94,7 +114,7 @@ def build_root_agent(model: str | None = None, planner_model: str | None = None)
         ),
         instruction=prompts.GROCERY_INSTRUCTION,
         tools=[build_grocery_list, get_meal_plan, estimate_cost],
-        before_tool_callback=block_non_vegetarian_tool_args,
+        before_tool_callback=[log_tool_intent, block_non_vegetarian_tool_args],
         before_model_callback=scrub_prompt_injection,
     )
     return LlmAgent(
@@ -104,20 +124,18 @@ def build_root_agent(model: str | None = None, planner_model: str | None = None)
         instruction=prompts.COORDINATOR_INSTRUCTION,
         tools=[
             get_user_profile,
-            update_user_profile,
             list_diet_options,
-            rate_meal,
             search_recipes,
             get_recipe,
             validate_vegetarian,
             get_meal_plan,
-            swap_meal,
             estimate_cost,
+            *coordinator_write_tools(require_confirmation),
             load_memory,
             AgentTool(agent=planning_pipeline),
             AgentTool(agent=grocery_agent),
         ],
-        before_tool_callback=block_non_vegetarian_tool_args,
+        before_tool_callback=[log_tool_intent, block_non_vegetarian_tool_args],
         before_model_callback=scrub_prompt_injection,
     )
 

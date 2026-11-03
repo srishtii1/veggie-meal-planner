@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # uv.lock is generated behind a corporate package proxy; on GitHub runners re-resolve the
+  # same pins against public PyPI (see CONTRIBUTING.md -> "Lockfile").
+  UV_DEFAULT_INDEX: https://pypi.org/simple
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -21,7 +26,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --all-groups --frozen
+      - run: uv lock && uv sync --all-groups --locked
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
       - run: uv run mypy
@@ -38,7 +43,7 @@ jobs:
         with:
           enable-cache: true
           python-version: ${{ matrix.python }}
-      - run: uv sync --all-groups --frozen
+      - run: uv lock && uv sync --all-groups --locked
       - run: uv run pytest -q -m "not integration" --cov --cov-report=xml --cov-report=term
         env:
           GOOGLE_API_KEY: not-a-real-key

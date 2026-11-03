@@ -8,9 +8,10 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from google.adk.apps import App
+from google.adk.flows.llm_flows.functions import REQUEST_CONFIRMATION_FUNCTION_CALL_NAME
 from google.adk.runners import Runner
 from google.genai import types
 from starlette.routing import Mount
@@ -20,7 +21,9 @@ from veggie_planner.agents import build_root_agent
 from veggie_planner.api.schemas import (
     ChatRequest,
     ChatResponse,
+    ConfirmRequest,
     HealthResponse,
+    PendingConfirmation,
     SessionResponse,
     ToolCallSummary,
 )
@@ -34,10 +37,58 @@ from veggie_planner.observability import (
     get_tracer,
     metrics_snapshot,
 )
+from veggie_planner.observability.redaction import redact_session, redact_value
 from veggie_planner.storage import get_plan_store
 from veggie_planner.tools.planning import CURRENT_PLAN_KEY
 
 log = structlog.get_logger(__name__)
+
+
+async def persist_memory(runner: Runner, *, user_id: str, session_id: str) -> None:
+    """Background task: copy the (PII-redacted) session into long-term memory.
+
+    Failures are logged, never raised -- memory is best-effort and must not affect chat.
+    """
+    if runner.memory_service is None:
+        return
+    try:
+        session = await runner.session_service.get_session(
+            app_name=runner.app_name, user_id=user_id, session_id=session_id
+        )
+        if session is None:
+            return
+        await runner.memory_service.add_session_to_memory(redact_session(session))
+        log.info("memory.persisted", session_id=session_id, events=len(session.events))
+    except Exception as exc:
+        log.warning("memory.persist_failed", session_id=session_id, error=str(exc))
+
+
+def _pending_from_call(confirmation_id: str, args: dict[str, Any]) -> PendingConfirmation:
+    original = args.get("originalFunctionCall") or args.get("original_function_call") or {}
+    conf = args.get("toolConfirmation") or args.get("tool_confirmation") or {}
+    tool = str(original.get("name", "unknown"))
+    tool_args = redact_value(dict(original.get("args") or {}))
+    return PendingConfirmation(
+        confirmation_id=confirmation_id,
+        tool=tool,
+        args=tool_args,
+        hint=str(conf.get("hint", "")),
+        summary=_describe(tool, tool_args),
+    )
+
+
+def _describe(tool: str, args: dict[str, Any]) -> str:
+    if tool == "swap_meal":
+        target = args.get("recipe_id") or "an automatically chosen recipe"
+        limit = args.get("max_prep_time_min")
+        extra = f" (max {limit} min)" if limit else ""
+        return f"replace {args.get('day')} {args.get('slot')} with {target}{extra}"
+    if tool == "rate_meal":
+        return f"permanently ban recipe '{args.get('recipe_id')}' from future plans"
+    if tool == "update_user_profile":
+        changes = ", ".join(f"{k}={v}" for k, v in args.items())
+        return f"update your profile ({changes}), which relaxes a safety constraint"
+    return f"run {tool}"
 
 
 def build_runner(settings: Settings, model: Any | None = None) -> Runner:
@@ -108,60 +159,132 @@ def create_app(
     async def metrics() -> JSONResponse:
         return JSONResponse(metrics_snapshot())
 
-    @app.post("/chat", response_model=ChatResponse, tags=["agent"])
-    async def chat(body: ChatRequest, runner: Runner = Depends(runner_dep)) -> ChatResponse:  # noqa: B008
-        session_service = runner.session_service
-        session = None
-        if body.session_id:
-            session = await session_service.get_session(
-                app_name=runner.app_name, user_id=body.user_id, session_id=body.session_id
-            )
-            if session is None:
-                raise HTTPException(status_code=404, detail="session not found")
-        else:
-            session = await session_service.create_session(
-                app_name=runner.app_name, user_id=body.user_id
-            )
-
-        structlog.contextvars.bind_contextvars(session_id=session.id, user_id=body.user_id)
-        with get_tracer().start_as_current_span("POST /chat") as span:
-            span.set_attribute("session.id", session.id)
-            span.set_attribute("user.id", body.user_id)
+    async def run_turn(
+        runner: Runner,
+        *,
+        user_id: str,
+        session_id: str,
+        message: types.Content,
+        span_name: str,
+        background: BackgroundTasks,
+    ) -> ChatResponse:
+        """Run one agent turn, collect reply / tool trajectory / pending confirmations."""
+        structlog.contextvars.bind_contextvars(session_id=session_id, user_id=user_id)
+        with get_tracer().start_as_current_span(span_name) as span:
+            span.set_attribute("session.id", session_id)
+            span.set_attribute("user.id", user_id)
             reply_parts: list[str] = []
             tool_calls: list[ToolCallSummary] = []
-            message = types.Content(role="user", parts=[types.Part(text=body.message)])
+            pending: dict[str, PendingConfirmation] = {}
             async for event in runner.run_async(
-                user_id=body.user_id, session_id=session.id, new_message=message
+                user_id=user_id, session_id=session_id, new_message=message
             ):
                 for part in event.content.parts if event.content and event.content.parts else []:
-                    if part.function_call and part.function_call.name:
-                        tool_calls.append(
-                            ToolCallSummary(agent=event.author, tool=part.function_call.name)
-                        )
-                    if part.function_response:
-                        resp = part.function_response.response
+                    fc = part.function_call
+                    if fc and fc.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME and fc.id:
+                        pending[fc.id] = _pending_from_call(fc.id, dict(fc.args or {}))
+                    elif fc and fc.name:
+                        tool_calls.append(ToolCallSummary(agent=event.author, tool=fc.name))
+                    fr = part.function_response
+                    if fr and fr.name == REQUEST_CONFIRMATION_FUNCTION_CALL_NAME and fr.id:
+                        pending.pop(fr.id, None)
+                    elif fr:
+                        resp = fr.response
                         status = resp.get("status") if isinstance(resp, dict) else None
+                        if isinstance(resp, dict) and "requires confirmation" in str(
+                            resp.get("error", "")
+                        ):
+                            status = "awaiting_confirmation"
                         for tc in reversed(tool_calls):
-                            if tc.tool == part.function_response.name and tc.status is None:
+                            if tc.tool == fr.name and tc.status is None:
                                 tc.status = str(status) if status is not None else "ok"
                                 break
                 if event.is_final_response() and event.content and event.content.parts:
                     reply_parts.extend(p.text for p in event.content.parts if p.text)
+            span.set_attribute("hitl.pending_confirmations", len(pending))
             trace_id = format(span.get_span_context().trace_id, "032x")
 
-        updated = await session_service.get_session(
-            app_name=runner.app_name, user_id=body.user_id, session_id=session.id
+        updated = await runner.session_service.get_session(
+            app_name=runner.app_name, user_id=user_id, session_id=session_id
         )
-        if updated is not None and runner.memory_service is not None:
-            await runner.memory_service.add_session_to_memory(updated)
+        # Long-term memory ingestion is slow (and remote for Vertex Memory Bank): never
+        # make the user wait for it. Runs after the response is sent.
+        background.add_task(persist_memory, runner, user_id=user_id, session_id=session_id)
         structlog.contextvars.unbind_contextvars("session_id", "user_id")
+        reply = "\n".join(reply_parts).strip()
+        if pending and not reply:
+            reply = "I need your approval before I continue: " + "; ".join(
+                p.summary for p in pending.values()
+            )
         return ChatResponse(
-            session_id=session.id,
-            user_id=body.user_id,
-            reply="\n".join(reply_parts).strip(),
+            session_id=session_id,
+            user_id=user_id,
+            reply=reply,
             tool_calls=tool_calls,
+            pending_confirmations=list(pending.values()),
             current_plan_id=(updated.state.get(CURRENT_PLAN_KEY) if updated else None),
             trace_id=trace_id,
+        )
+
+    async def resolve_session(runner: Runner, user_id: str, session_id: str | None) -> str:
+        if session_id:
+            session = await runner.session_service.get_session(
+                app_name=runner.app_name, user_id=user_id, session_id=session_id
+            )
+            if session is None:
+                raise HTTPException(status_code=404, detail="session not found")
+            return session.id
+        created = await runner.session_service.create_session(
+            app_name=runner.app_name, user_id=user_id
+        )
+        return created.id
+
+    @app.post("/chat", response_model=ChatResponse, tags=["agent"])
+    async def chat(
+        body: ChatRequest,
+        background: BackgroundTasks,
+        runner: Runner = Depends(runner_dep),  # noqa: B008
+    ) -> ChatResponse:
+        """Send a user message. If an action needs approval, ``pending_confirmations`` is set
+        and the action has **not** run yet; answer it with ``POST /chat/confirm``."""
+        session_id = await resolve_session(runner, body.user_id, body.session_id)
+        message = types.Content(role="user", parts=[types.Part(text=body.message)])
+        return await run_turn(
+            runner,
+            user_id=body.user_id,
+            session_id=session_id,
+            message=message,
+            span_name="POST /chat",
+            background=background,
+        )
+
+    @app.post("/chat/confirm", response_model=ChatResponse, tags=["agent"])
+    async def confirm(
+        body: ConfirmRequest,
+        background: BackgroundTasks,
+        runner: Runner = Depends(runner_dep),  # noqa: B008
+    ) -> ChatResponse:
+        """Approve or reject a pending action (human-in-the-loop)."""
+        session_id = await resolve_session(runner, body.user_id, body.session_id)
+        log.info(
+            "hitl.decision",
+            confirmation_id=body.confirmation_id,
+            approved=body.approved,
+            session_id=session_id,
+        )
+        response = types.FunctionResponse(
+            id=body.confirmation_id,
+            name=REQUEST_CONFIRMATION_FUNCTION_CALL_NAME,
+            response={"confirmed": body.approved, "payload": {"reason": body.reason}},
+        )
+        message = types.Content(role="user", parts=[types.Part(function_response=response)])
+        return await run_turn(
+            runner,
+            user_id=body.user_id,
+            session_id=session_id,
+            message=message,
+            span_name="POST /chat/confirm",
+            background=background,
         )
 
     @app.get("/sessions/{session_id}", response_model=SessionResponse, tags=["agent"])

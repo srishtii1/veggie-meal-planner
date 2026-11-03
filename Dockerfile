@@ -2,15 +2,18 @@
 # ---- builder -----------------------------------------------------------------
 FROM python:3.12-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /bin/
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+ARG UV_DEFAULT_INDEX=https://pypi.org/simple
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
+    UV_DEFAULT_INDEX=${UV_DEFAULT_INDEX}
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
+# Re-resolve the lock against the build's index (public PyPI by default) keeping the pins.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv lock && uv sync --locked --no-dev --no-install-project
 COPY src ./src
 COPY README.md LICENSE ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --locked --no-dev
 
 # ---- runtime -----------------------------------------------------------------
 FROM python:3.12-slim AS runtime

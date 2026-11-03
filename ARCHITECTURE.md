@@ -74,6 +74,25 @@ meal_planner_coordinator (LlmAgent, chat)
 6. **Presenter** renders the saved plan from the store (no LLM call), which becomes the
    `AgentTool` result the coordinator relays.
 
+### Human-in-the-loop
+
+Side-effecting coordinator tools are wrapped in `FunctionTool(require_confirmation=policy)`
+(`agents/confirmation.py`). When a policy fires, ADK does not execute the tool; it emits an
+`adk_request_confirmation` long-running call and the turn ends. The REST API surfaces this as
+`pending_confirmations` (with redacted args and a human-readable summary) and the client
+answers via `POST /chat/confirm {confirmation_id, approved}`; ADK then re-runs or rejects the
+original call in the same session.
+
+| Action | Gated when |
+|---|---|
+| `swap_meal` (coordinator) | always — it edits a plan the user has already seen |
+| `rate_meal` | rating = 1 (permanent ban) |
+| `update_user_profile` | it removes an allergen or changes an established diet |
+
+The planner's internal swaps inside the draft→critique loop are not gated: that draft hasn't
+been shown yet and `AgentTool` runs can't pause. `VMP_REQUIRE_CONFIRMATION=false` turns gating
+off for batch/eval runs.
+
 Why `AgentTool` rather than `sub_agents` transfer: the user keeps talking to one agent, the
 nested run's state deltas (`current_plan_id`, `user:plan_ids`) flow back automatically, and
 the result is a single string the coordinator can summarise.
@@ -99,7 +118,8 @@ and tools fetch the bodies.
 ## 4. Interfaces
 
 - **REST** — `POST /chat` (`message`, `user_id`, optional `session_id`) returns the reply,
-  tool-call trajectory, `current_plan_id` and `trace_id`. `GET /sessions/{id}`,
+  tool-call trajectory, `pending_confirmations`, `current_plan_id` and `trace_id`;
+  `POST /chat/confirm` approves/rejects a pending action. `GET /sessions/{id}`,
   `GET /plans/{id}`, `GET /recipes/{id}`, `GET /healthz`, `GET /metrics`, OpenAPI at `/docs`.
 - **A2A** — `to_a2a(root_agent, runner=...)` mounted under `/a2a`; Agent Card at
   `/a2a/.well-known/agent-card.json` lists every tool as a skill. Both surfaces share one
@@ -116,7 +136,34 @@ and tools fetch the bodies.
   `agent.llm_calls`, `agent.tokens{kind}`, `agent.llm_latency`, `agent.tool_calls{tool}`,
   `agent.tool_errors`, `agent.tool_latency`, `agent.guardrail_blocks`. `GET /metrics` dumps
   the in-memory reader for quick inspection.
+- **Intended actions**: `observability/audit.py::log_tool_intent` is the first
+  `before_tool_callback` on every agent. Before any tool runs it logs `tool.intent` (tool,
+  agent, redacted args, `side_effect`, `requires_confirmation`, approval decision) and adds
+  the same as a span event — so attempts later blocked by a guardrail or rejected by the user
+  are still auditable. `MetricsPlugin` logs the outcome (`tool.call`).
 - structlog JSON logs carry `trace_id`, `span_id`, `session_id`, `invocation_id`.
+
+### Privacy / PII
+
+`observability/redaction.py` scrubs emails, phone numbers, card numbers, SSNs, IPs, street
+addresses and API-key-shaped secrets (and fully masks `api_key`/`token`/`password` fields):
+
+| Sink | Mechanism |
+|---|---|
+| structlog | `redact_processor` before rendering |
+| stdlib logging (ADK, uvicorn) | `RedactingFilter` on root handlers |
+| OTel spans + span events | `RedactingSpanExporter` wraps every exporter; ADK message-content capture is **off** by default (`VMP_CAPTURE_CONTENT_IN_SPANS`) |
+| Long-term memory | `redact_session` copy is what gets ingested |
+| HITL API payloads | pending-confirmation args are redacted |
+
+The model still sees the user's original words for the current turn; redaction governs what
+is persisted and emitted.
+
+### Memory writes are off the request path
+
+`/chat` and `/chat/confirm` schedule `persist_memory` with FastAPI `BackgroundTasks`, so the
+response returns as soon as the agent finishes; ingestion (remote for Vertex Memory Bank) runs
+afterwards and failures are logged, never surfaced to the user.
 
 ## 6. Infrastructure
 
